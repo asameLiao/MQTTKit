@@ -6,6 +6,7 @@
 //  Copyright (c) 2013 Jeff Mesnil. All rights reserved.
 //  Copyright 2012 Nicholas Humfrey. All rights reserved.
 //
+#import <Foundation/Foundation.h>
 
 typedef enum MQTTConnectionReturnCode : NSUInteger {
     ConnectionAccepted,
@@ -21,6 +22,13 @@ typedef enum MQTTQualityOfService : NSUInteger {
     AtLeastOnce,
     ExactlyOnce
 } MQTTQualityOfService;
+
+typedef NS_ENUM(UInt8, MQTTProtocolVer) {
+    MQTTProtocolVer0 = 0,
+    MQTTProtocolVer31 = 3,
+    MQTTProtocolVer311 = 4,
+    MQTTProtocolVer50 = 5
+};
 
 #pragma mark - MQTT Message
 
@@ -42,10 +50,13 @@ typedef void (^MQTTDisconnectionHandler)(NSUInteger code);
 #pragma mark - MQTT Client
 
 @class MQTTClient;
+@protocol MQTTKitDelegate;
 
 @interface MQTTClient : NSObject {
     struct mosquitto *mosq;
 }
+
+@property(nonatomic, weak) id<MQTTKitDelegate> delegate;
 
 @property (readwrite, copy) NSString *clientID;
 @property (readwrite, copy) NSString *host;
@@ -68,14 +79,24 @@ typedef void (^MQTTDisconnectionHandler)(NSUInteger code);
 - (MQTTClient*) initWithClientId: (NSString *)clientId
                     cleanSession: (BOOL )cleanSession;
 
+- (void) setProtocolVersion:(MQTTProtocolVer)protocolVersion;//default is mqtt 3.1
 - (void) setMaxInflightMessages:(NSUInteger)maxInflightMessages;
 - (void) setMessageRetry: (NSUInteger)seconds;
 
 #pragma mark - Connection
 
 - (void) connectWithCompletionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler;
+
 - (void) connectToHost: (NSString*)host
      completionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler;
+
+- (void) connectToHost: (NSString*)host
+                caFile: (NSString *)caFile
+                caPath: (NSString *)caPath
+               keyFile: (NSString *)keyFile
+              certFile: (NSString *)certFile
+     completionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler;
+
 - (void) disconnectWithCompletionHandler:(MQTTDisconnectionHandler)completionHandler;
 - (void) reconnect;
 - (void)setWillData:(NSData *)payload
@@ -111,4 +132,11 @@ completionHandler:(MQTTSubscriptionCompletionHandler)completionHandler;
 - (void)unsubscribe: (NSString *)topic
 withCompletionHandler:(void (^)(void))completionHandler;
 
+@end
+
+@protocol MQTTKitDelegate <NSObject>
+
+- (void)newMessage:(MQTTClient *)client message:(MQTTMessage *)message;
+
+- (void)mqttEvent:(MQTTClient *)client event:(MQTTConnectionReturnCode)eventCode error:(NSError *)error;
 @end
