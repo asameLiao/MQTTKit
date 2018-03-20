@@ -10,7 +10,7 @@
 #import "MQTTKit.h"
 #import "mosquitto.h"
 
-#if 0 // set to 1 to enable logs
+#if 1 // set to 1 to enable logs
 
 #define LogDebug(frmt, ...) NSLog(frmt, ##__VA_ARGS__);
 
@@ -19,6 +19,8 @@
 #define LogDebug(frmt, ...) {}
 
 #endif
+
+#define WITH_TLS 1
 
 #pragma mark - MQTT Message
 
@@ -86,6 +88,10 @@ static void on_connect(struct mosquitto *mosq, void *obj, int rc)
     if (client.connectionCompletionHandler) {
         client.connectionCompletionHandler(rc);
     }
+    
+    if (client.delegate && [client respondsToSelector:@selector(mqttEvent:event:error:)]) {
+        [client.delegate mqttEvent:client event:rc error:rc!=0?[NSError errorWithDomain:@"MQTT" code:rc userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithUTF8String:mosquitto_connack_string(rc)]}]:nil];
+    }
 }
 
 static void on_disconnect(struct mosquitto *mosq, void *obj, int rc)
@@ -99,6 +105,10 @@ static void on_disconnect(struct mosquitto *mosq, void *obj, int rc)
     client.connected = NO;
     if (client.disconnectionHandler) {
         client.disconnectionHandler(rc);
+    }
+    
+    if (client.delegate && [client respondsToSelector:@selector(mqttEvent:event:error:)]) {
+        [client.delegate mqttEvent:client event:rc error:rc!=0?[NSError errorWithDomain:@"MQTT" code:rc userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithUTF8String:mosquitto_strerror(rc)]}]:nil];
     }
 }
 
@@ -132,6 +142,10 @@ static void on_message(struct mosquitto *mosq, void *obj, const struct mosquitto
         LogDebug(@"[%@] on message %@", client.clientID, message);
         if (client.messageHandler) {
             client.messageHandler(message);
+        }
+        
+        if (client.delegate && [client.delegate respondsToSelector:@selector(newMessage:message:)]) {
+            [client.delegate newMessage:client message:message];
         }
     }
 }
@@ -204,10 +218,19 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
         mosquitto_message_callback_set(mosq, on_message);
         mosquitto_subscribe_callback_set(mosq, on_subscribe);
         mosquitto_unsubscribe_callback_set(mosq, on_unsubscribe);
+        
+        int protocolVersoin = MQTTProtocolVer31;
+        mosquitto_opts_set(mosq, MOSQ_OPT_PROTOCOL_VERSION, &protocolVersoin);
 
+        
         self.queue = dispatch_queue_create(cstrClientId, NULL);
     }
     return self;
+}
+
+- (void)setProtocolVersion:(MQTTProtocolVer)protocolVersion
+{
+    mosquitto_opts_set(mosq, MOSQ_OPT_PROTOCOL_VERSION, &protocolVersion);
 }
 
 - (void) setMaxInflightMessages:(NSUInteger)maxInflightMessages
@@ -257,6 +280,15 @@ static void on_unsubscribe(struct mosquitto *mosq, void *obj, int message_id)
 - (void)connectToHost:(NSString *)host
     completionHandler:(void (^)(MQTTConnectionReturnCode code))completionHandler {
     self.host = host;
+    [self connectWithCompletionHandler:completionHandler];
+}
+int* pw_callback(char *buf, int size, int rwflag, void *userdata) {
+    
+    return NULL;
+}
+- (void)connectToHost:(NSString *)host caFile:(NSString *)caFile caPath:(NSString *)caPath keyFile:(NSString *)keyFile certFile:(NSString *)certFile completionHandler:(void (^)(MQTTConnectionReturnCode))completionHandler {
+    
+    mosquitto_tls_set(mosq, [caFile UTF8String], caPath.UTF8String, certFile.UTF8String, keyFile.UTF8String, pw_callback);
     [self connectWithCompletionHandler:completionHandler];
 }
 
